@@ -36,7 +36,8 @@ void subscriber_func(mqtt::async_client_ptr cli) {
         }
 
         json::value jv = json::parse(msg->to_string());
-        cout << jv << endl;
+        string topic = msg->get_topic();
+        //cout << jv << endl;
         // cout << msg->get_topic() << ": " << msg->to_string() << endl;
     }
 }
@@ -49,7 +50,7 @@ int main(int argc, char* argv[]) {
     generic.add_options()("help,h", "Display this help message")(
         "version,v", "Display the version number")(
         "config,c",
-        po::value<string>(&config_path)->default_value("config.ini"),
+        po::value<string>(&config_path),
         "Path to (optional) config file.");
 
     po::options_description config("Configuration");
@@ -71,13 +72,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (fs::exists(config_path)) {
-        po::store(po::parse_config_file(config_path.c_str(), config), vm);
-    }
-    else {
-        BOOST_LOG_TRIVIAL(error)
-            << "Specified config file '" << config_path << "' does not exist!";
-        return EXIT_FAILURE;
+    if (vm.count("config")) {
+        if (fs::exists(config_path)) {
+            po::store(po::parse_config_file(config_path.c_str(), config), vm);
+        }
+        else {
+            BOOST_LOG_TRIVIAL(error)
+                << "Specified config file '" << config_path << "' does not exist!";
+            return EXIT_FAILURE;
+        }
     }
 
     po::notify(vm);
