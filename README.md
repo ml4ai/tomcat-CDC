@@ -5,8 +5,10 @@ ToMCAT's Coordination Detection Component
 To install the prerequisites using MacPorts:
 
 ```
+sudo port selfupdate
 sudo port install cmake boost paho.mqtt.cpp
 ```
+
 To build:
 
 ```
