@@ -20,15 +20,15 @@ namespace fs = boost::filesystem;
 using namespace std;
 using namespace std::chrono;
 
-
-void process_dialog_agent_message(mqtt::const_message_ptr msg) {
-    json::value jv = json::parse(msg->to_string());
-    cout << jv << endl;
+namespace {
+    volatile std::sig_atomic_t gSignalStatus;
 }
+
+void signal_handler(int signal) { gSignalStatus = signal; }
 
 class Agent {
     shared_ptr<mqtt::async_client> mqtt_client;
-    thread publisher, subscriber;
+    thread publisher;
     bool agent_stopped = false;
 
   public:
@@ -43,43 +43,28 @@ class Agent {
                             .automatic_reconnect(seconds(2), seconds(30))
                             .finalize();
 
-        auto topics = mqtt::string_collection::create({"agent/dialog"});
-        const vector<int> QOS{2};
-        // Start consuming _before_ connecting, because we could get a flood
-        // of stored messages as soon as the connection completes since
-        // we're using a persistent (non-clean) session with the broker.
-        this->mqtt_client->start_consuming();
+        mqtt_client->set_message_callback([&](mqtt::const_message_ptr msg){
+            process(msg);
+        });
 
-        BOOST_LOG_TRIVIAL(info)
-            << "Connecting to the MQTT broker at " << address << "...";
         auto rsp = this->mqtt_client->connect(connOpts)->get_connect_response();
+        BOOST_LOG_TRIVIAL(info) << "Connected to the MQTT broker at " << address;
+
+        mqtt_client->subscribe("agent/dialog", 2);
     };
 
     void start() {
         this->publisher = thread(&Agent::heartbeat_publisher_func, this);
-        // this->subscriber = jthread(subscriber_func, this->mqtt_client);
-        // this->publisher.join();
-        // this->subscriber.join();
     }
 
     void disconnect() {
-        BOOST_LOG_TRIVIAL(info) << "Disconnecting...";
-        this->mqtt_client->disconnect();
+        BOOST_LOG_TRIVIAL(info) << "Disconnecting from MQTT broker...";
+        this->mqtt_client->disconnect()->wait();
     }
 
-    void subscriber_func() {
-        while (true) {
-            mqtt::const_message_ptr msg = this->mqtt_client->consume_message();
-
-            if (!msg) {
-                continue;
-            }
-
-            string topic = msg->get_topic();
-            if (topic == "agent/dialog") {
-                process_dialog_agent_message(msg);
-            }
-        }
+    void process(mqtt::const_message_ptr msg) {
+        json::value jv = json::parse(msg->to_string());
+        cout << jv << endl;
     }
 
     void heartbeat_publisher_func() {
@@ -92,9 +77,11 @@ class Agent {
     ~Agent() {
         this->agent_stopped = true;
         if (this->publisher.joinable()) {
-            BOOST_LOG_TRIVIAL(info) << "Shutting down publisher thread";
+            BOOST_LOG_TRIVIAL(info) << "Shutting down publisher thread...";
             this->publisher.join();
         }
+        this->disconnect();
+        BOOST_LOG_TRIVIAL(info) << "Disconnected from MQTT broker.";
     }
 };
 
@@ -144,14 +131,20 @@ int main(int argc, char* argv[]) {
     string address = "tcp://" + vm["mqtt.host"].as<string>() + ":" +
                      to_string(vm["mqtt.port"].as<int>());
 
+    signal(SIGINT, signal_handler);
+
     Agent agent(address);
     agent.start();
-    while(true) {
-        cout << "Agent is running" << endl;
-        this_thread::sleep_for(seconds(1));
+    while (true) {
+        if (gSignalStatus == SIGINT) {
+            BOOST_LOG_TRIVIAL(info)
+                << "Keyboard interrupt detected (Ctrl-C), shutting down.";
+            break;
+        }
+        else {
+            this_thread::sleep_for(milliseconds(100));
+        }
     }
-
-    // Disconnect
 
     return EXIT_SUCCESS;
 }
