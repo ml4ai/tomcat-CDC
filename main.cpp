@@ -7,6 +7,8 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <queue>
+
 
 #include <boost/filesystem.hpp>
 #include <boost/json.hpp>
@@ -30,6 +32,8 @@ class Agent {
     shared_ptr<mqtt::async_client> mqtt_client;
     thread publisher;
     bool agent_stopped = false;
+    size_t utterance_window_size = 5;
+    queue<json::value> utterance_queue;
 
   public:
     Agent(string address) {
@@ -62,9 +66,20 @@ class Agent {
         this->mqtt_client->disconnect()->wait();
     }
 
+    void look_for_label(string label_1, string label_2, queue<json::value> utterance_queue) {
+        // Check first item in the queue for label1
+        json::value item_1 = utterance_queue.front();
+        cout << item_1 << endl;
+    }
+
     void process(mqtt::const_message_ptr msg) {
         json::value jv = json::parse(msg->to_string());
-        cout << jv << endl;
+        if (utterance_queue.size() == utterance_window_size) {
+            utterance_queue.pop();
+        }
+        utterance_queue.push(jv);
+        // Look for label
+        look_for_label("CriticalVictim", "MoveTo", utterance_queue);
     }
 
     void heartbeat_publisher_func() {
