@@ -29,10 +29,16 @@ namespace {
 
 void signal_handler(int signal) { gSignalStatus = signal; }
 
+string get_timestamp() {
+    return boost::posix_time::to_iso_extended_string(
+               boost::posix_time::microsec_clock::universal_time()) +
+           "Z";
+}
+
 class Agent {
     shared_ptr<mqtt::async_client> mqtt_client;
-    thread publisher;
-    bool agent_stopped = false;
+    thread heartbeat_publisher;
+    bool running = true;
     size_t utterance_window_size = 5;
     queue<json::value> utterance_queue;
 
@@ -60,7 +66,7 @@ class Agent {
     };
 
     void start() {
-        this->publisher = thread(&Agent::heartbeat_publisher_func, this);
+        this->heartbeat_publisher = thread(&Agent::publish_heartbeats, this);
     }
 
     void disconnect() {
@@ -76,8 +82,27 @@ class Agent {
         auto participant_id = item_1.at("data").at("participant_id");
         auto extractions = item_1.at("data").at("extractions").as_array();
         for (auto x : extractions) {
-            cout << item_1.at("data").at("asr_msg_id") << x.at("labels") << endl;
+            cout << item_1.at("data").at("asr_msg_id") << x.at("labels")
+                 << endl;
         }
+
+        string timestamp = get_timestamp();
+
+        json::value output_message = {
+            {"header",
+             {{"timestamp", timestamp},
+              {"message_type", "status"},
+              {"version", "0.1"}}},
+            {"msg",
+             {{"timestamp", timestamp},
+              {"sub_type", "Event:dialog_coordination_event"},
+              {"source", "tomcat-CDC"},
+              {"version", "0.0.1"}}}};
+
+        output_message.as_object()["data"] = {{"key", "value"}};
+
+        mqtt_client->publish("agent/tomcat-CDC/coordination_event",
+                             json::serialize(output_message));
     }
 
     void process(mqtt::const_message_ptr msg) {
@@ -96,26 +121,21 @@ class Agent {
         look_for_label("CriticalVictim", "MoveTo", utterance_queue);
     }
 
-    void heartbeat_publisher_func() {
-        while (!this->agent_stopped) {
+    void publish_heartbeats() {
+        while (this->running) {
             this_thread::sleep_for(seconds(1));
-            string timestamp =
-                boost::posix_time::to_iso_extended_string(
-                    boost::posix_time::microsec_clock::universal_time()) +
-                "Z";
 
-            json::value jv = {
-                {"header", {
-                    {"timestamp", timestamp},
-                    {"message_type", "status"},
-                    {"version", "0.1"}}},
-                {"msg", {
-                    {"timestamp", timestamp},
-                    {"sub_type", "heartbeat"},
-                    {"source", "tomcat-CDC"},
-                    {"version", "0.0.1"}}},
-                {"data", {{"state", "ok"}}}
-            };
+            string timestamp = get_timestamp();
+            json::value jv = {{"header",
+                               {{"timestamp", timestamp},
+                                {"message_type", "status"},
+                                {"version", "0.1"}}},
+                              {"msg",
+                               {{"timestamp", timestamp},
+                                {"sub_type", "heartbeat"},
+                                {"source", "tomcat-CDC"},
+                                {"version", "0.0.1"}}},
+                              {"data", {{"state", "ok"}}}};
 
             this->mqtt_client
                 ->publish("status/tomcat-CDC/heartbeats", json::serialize(jv))
@@ -124,10 +144,11 @@ class Agent {
     }
 
     ~Agent() {
-        this->agent_stopped = true;
-        if (this->publisher.joinable()) {
-            BOOST_LOG_TRIVIAL(info) << "Shutting down publisher thread...";
-            this->publisher.join();
+        this->running = false;
+        if (this->heartbeat_publisher.joinable()) {
+            BOOST_LOG_TRIVIAL(info)
+                << "Shutting down heartbeat_publisher thread...";
+            this->heartbeat_publisher.join();
         }
         this->disconnect();
     }
