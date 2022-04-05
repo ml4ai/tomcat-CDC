@@ -29,66 +29,46 @@ namespace {
 
 void signal_handler(int signal) { gSignalStatus = signal; }
 
+/** Get current UTC timestamp in ISO-8601 format. */
 string get_timestamp() {
     return boost::posix_time::to_iso_extended_string(
                boost::posix_time::microsec_clock::universal_time()) +
            "Z";
 }
 
+/** Class that represents our agent/AC */
 class Agent {
     shared_ptr<mqtt::async_client> mqtt_client;
     thread heartbeat_publisher;
     bool running = true;
     size_t utterance_window_size = 5;
-    queue<json::value> utterance_queue;
 
-  public:
-    Agent(string address) {
-        // Create an MQTT client using a smart pointer to be shared among
-        // threads.
-        this->mqtt_client = make_shared<mqtt::async_client>(address, "agent");
+    // We use a deque instead of a queue since we will want to iterate over it.
+    deque<json::object> utterance_queue;
 
-        // Connect options for a non-persistent session and automatic
-        // reconnects.
-        auto connOpts = mqtt::connect_options_builder()
-                            .clean_session(true)
-                            .automatic_reconnect(seconds(2), seconds(30))
-                            .finalize();
-
-        mqtt_client->set_message_callback(
-            [&](mqtt::const_message_ptr msg) { process(msg); });
-
-        auto rsp = this->mqtt_client->connect(connOpts)->get_connect_response();
-        BOOST_LOG_TRIVIAL(info)
-            << "Connected to the MQTT broker at " << address;
-
-        mqtt_client->subscribe("agent/dialog", 2);
-    };
-
-    void start() {
-        this->heartbeat_publisher = thread(&Agent::publish_heartbeats, this);
-    }
-
+    /** Disconnect from the MQTT broker */
     void disconnect() {
         BOOST_LOG_TRIVIAL(info) << "Disconnecting from MQTT broker...";
         this->mqtt_client->disconnect()->wait();
     }
 
-    void look_for_label(string label_1,
-                        string label_2,
-                        queue<json::value> utterance_queue) {
-        // Check first item in the queue for label1
-        json::value item_1 = utterance_queue.front();
-        auto participant_id = item_1.at("data").at("participant_id");
-        auto extractions = item_1.at("data").at("extractions").as_array();
-        for (auto x : extractions) {
-            cout << item_1.at("data").at("asr_msg_id") << x.at("labels")
-                 << endl;
+    /** Simple function that allows you to look for a simple label */
+    bool look_for_label(const json::array extractions, string label) {
+        for (auto extraction : extractions) {
+            json::array labels = extraction.at("labels").as_array();
+            if (find(labels.begin(),
+                     labels.end(),
+                     json::string(label.c_str()))) {
+                return true;
+            }
         }
+        return false;
+    }
 
+    void publish_coordination_message() {
         string timestamp = get_timestamp();
 
-        json::value output_message = {
+        json::object output_message = {
             {"header",
              {{"timestamp", timestamp},
               {"message_type", "status"},
@@ -99,14 +79,54 @@ class Agent {
               {"source", "tomcat-CDC"},
               {"version", "0.0.1"}}}};
 
-        output_message.as_object()["data"] = {{"key", "value"}};
+        // To modify values, we must view them as objects using the as_object()
+        // method.
+        output_message["data"] = {{"key", "value"}};
 
         mqtt_client->publish("agent/tomcat-CDC/coordination_event",
                              json::serialize(output_message));
     }
+    /** This method takes 3 args, a Queue and 2 labels. It checks if the first
+     * item in the queue is the label. If it is, it also checks if any of the
+     * other items in the queue have this label  */
+    void check_label_seq_2(const string& label_1,
+                           const string& label_2,
+                           deque<json::object> utterance_queue) {
 
+        // Check first item in the queue for label1
+        json::object item_1 = utterance_queue.front();
+
+        json::string id1 = item_1.at("data").at("participant_id").as_string();
+
+        json::array item_1_extractions =
+            item_1.at("data").at("extractions").as_array();
+
+        if (look_for_label(item_1_extractions, label_1)) {
+            BOOST_LOG_TRIVIAL(info) << "First label detected";
+            for (size_t i = 1; i < utterance_queue.size(); i++) {
+                json::array extractions = utterance_queue.at(i)
+                                              .at("data")
+                                              .at("extractions")
+                                              .as_array();
+                json::string id2 = utterance_queue.at(i)
+                                       .at("data")
+                                       .at("participant_id")
+                                       .as_string();
+                if (look_for_label(extractions, label_2) and (id1 != id2)) {
+                    BOOST_LOG_TRIVIAL(info) << label_1 << " and " << label_2
+                                            << " sequence detected.";
+                    publish_coordination_message();
+                };
+            }
+        };
+    }
+
+    /** Function that processes incoming messages */
     void process(mqtt::const_message_ptr msg) {
-        json::value jv = json::parse(msg->to_string());
+        json::object jv = json::parse(msg->to_string()).as_object();
+
+        // Uncomment the line below to print the message
+        // cout << jv << endl;
 
         // Ensure that the participant_id is not Server
         if (jv.at("data").at("participant_id") == "Server") {
@@ -114,13 +134,15 @@ class Agent {
         }
 
         if (utterance_queue.size() == utterance_window_size) {
-            utterance_queue.pop();
+            utterance_queue.pop_front();
         }
-        utterance_queue.push(jv);
+
+        utterance_queue.push_back(jv);
         // Look for label
-        look_for_label("CriticalVictim", "MoveTo", utterance_queue);
+        check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
     }
 
+    /** Function that publishes heartbeat messages while the agent is running */
     void publish_heartbeats() {
         while (this->running) {
             this_thread::sleep_for(seconds(1));
@@ -143,11 +165,39 @@ class Agent {
         }
     }
 
+
+  public:
+    Agent(string address) {
+        // Create an MQTT client using a smart pointer to be shared among
+        // threads.
+        this->mqtt_client = make_shared<mqtt::async_client>(address, "agent");
+
+        // Connect options for a non-persistent session and automatic
+        // reconnects.
+        auto connOpts = mqtt::connect_options_builder()
+                            .clean_session(true)
+                            .automatic_reconnect(seconds(2), seconds(30))
+                            .finalize();
+
+        mqtt_client->set_message_callback(
+            [&](mqtt::const_message_ptr msg) { process(msg); });
+
+        auto rsp = this->mqtt_client->connect(connOpts)->get_connect_response();
+        BOOST_LOG_TRIVIAL(info)
+            << "Connected to the MQTT broker at " << address;
+
+        mqtt_client->subscribe("agent/dialog", 2);
+
+        /** Start publishing heartbeat messages */
+        this->heartbeat_publisher = thread(&Agent::publish_heartbeats, this);
+    };
+
+    /** Destructor for the class that cleans up threads and disconnects from
+     * the broker. */
     ~Agent() {
         this->running = false;
         if (this->heartbeat_publisher.joinable()) {
-            BOOST_LOG_TRIVIAL(info)
-                << "Shutting down heartbeat_publisher thread...";
+            BOOST_LOG_TRIVIAL(info) << "Shutting down heartbeat thread...";
             this->heartbeat_publisher.join();
         }
         this->disconnect();
@@ -156,6 +206,7 @@ class Agent {
 
 int main(int argc, char* argv[]) {
 
+    // Setting up program options
     po::options_description generic("Generic options");
 
     string config_path;
@@ -177,13 +228,19 @@ int main(int argc, char* argv[]) {
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, cmdline_options), vm);
+
+    // We run notify this first time to pick up the -c/--config option
     po::notify(vm);
 
+    // Print a help message
     if (vm.count("help")) {
         cout << cmdline_options;
         return 1;
     }
 
+    // If the -c/--config option is passed to the program on the command line,
+    // we check for the existence of the specified config file and load the
+    // options from it.
     if (vm.count("config")) {
         if (fs::exists(config_path)) {
             po::store(po::parse_config_file(config_path.c_str(), config), vm);
@@ -195,6 +252,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // We run the notify function a second time in order to process the config
+    // file
     po::notify(vm);
 
     string address = "tcp://" + vm["mqtt.host"].as<string>() + ":" +
@@ -203,7 +262,6 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, signal_handler);
 
     Agent agent(address);
-    agent.start();
     while (true) {
         if (gSignalStatus == SIGINT) {
             BOOST_LOG_TRIVIAL(info)
