@@ -73,11 +73,21 @@ class Agent {
                         queue<json::value> utterance_queue) {
         // Check first item in the queue for label1
         json::value item_1 = utterance_queue.front();
-        cout << item_1.at("data").at("extractions") << endl;
+        auto participant_id = item_1.at("data").at("participant_id");
+        auto extractions = item_1.at("data").at("extractions").as_array();
+        for (auto x : extractions) {
+            cout << item_1.at("data").at("asr_msg_id") << x.at("labels") << endl;
+        }
     }
 
     void process(mqtt::const_message_ptr msg) {
         json::value jv = json::parse(msg->to_string());
+
+        // Ensure that the participant_id is not Server
+        if (jv.at("data").at("participant_id") == "Server") {
+            return;
+        }
+
         if (utterance_queue.size() == utterance_window_size) {
             utterance_queue.pop();
         }
