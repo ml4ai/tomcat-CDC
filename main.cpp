@@ -41,7 +41,7 @@ class Agent {
         // threads.
         this->mqtt_client = make_shared<mqtt::async_client>(address, "agent");
 
-        // Connect options for a persistent session and automatic reconnects.
+        // Connect options for a non-persistent session and automatic reconnects.
         auto connOpts = mqtt::connect_options_builder()
                             .clean_session(true)
                             .automatic_reconnect(seconds(2), seconds(30))
