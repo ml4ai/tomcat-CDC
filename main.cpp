@@ -1,19 +1,20 @@
-#include "mqtt/async_client.h"
 #include <chrono>
 #include <csignal>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <queue>
 #include <string>
 #include <thread>
-#include <queue>
 
-
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/json.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/program_options.hpp>
+
+#include "mqtt/async_client.h"
 
 namespace po = boost::program_options;
 namespace json = boost::json;
@@ -41,18 +42,19 @@ class Agent {
         // threads.
         this->mqtt_client = make_shared<mqtt::async_client>(address, "agent");
 
-        // Connect options for a non-persistent session and automatic reconnects.
+        // Connect options for a non-persistent session and automatic
+        // reconnects.
         auto connOpts = mqtt::connect_options_builder()
                             .clean_session(true)
                             .automatic_reconnect(seconds(2), seconds(30))
                             .finalize();
 
-        mqtt_client->set_message_callback([&](mqtt::const_message_ptr msg){
-            process(msg);
-        });
+        mqtt_client->set_message_callback(
+            [&](mqtt::const_message_ptr msg) { process(msg); });
 
         auto rsp = this->mqtt_client->connect(connOpts)->get_connect_response();
-        BOOST_LOG_TRIVIAL(info) << "Connected to the MQTT broker at " << address;
+        BOOST_LOG_TRIVIAL(info)
+            << "Connected to the MQTT broker at " << address;
 
         mqtt_client->subscribe("agent/dialog", 2);
     };
@@ -66,10 +68,12 @@ class Agent {
         this->mqtt_client->disconnect()->wait();
     }
 
-    void look_for_label(string label_1, string label_2, queue<json::value> utterance_queue) {
+    void look_for_label(string label_1,
+                        string label_2,
+                        queue<json::value> utterance_queue) {
         // Check first item in the queue for label1
         json::value item_1 = utterance_queue.front();
-        cout << item_1 << endl;
+        cout << item_1.at("data").at("extractions") << endl;
     }
 
     void process(mqtt::const_message_ptr msg) {
@@ -85,7 +89,27 @@ class Agent {
     void heartbeat_publisher_func() {
         while (!this->agent_stopped) {
             this_thread::sleep_for(seconds(1));
-            this->mqtt_client->publish("status/agent", "ok")->wait();
+            string timestamp =
+                boost::posix_time::to_iso_extended_string(
+                    boost::posix_time::microsec_clock::universal_time()) +
+                "Z";
+
+            json::value jv = {
+                {"header", {
+                    {"timestamp", timestamp},
+                    {"message_type", "status"},
+                    {"version", "0.1"}}},
+                {"msg", {
+                    {"timestamp", timestamp},
+                    {"sub_type", "heartbeat"},
+                    {"source", "tomcat-CDC"},
+                    {"version", "0.0.1"}}},
+                {"data", {{"state", "ok"}}}
+            };
+
+            this->mqtt_client
+                ->publish("status/tomcat-CDC/heartbeats", json::serialize(jv))
+                ->wait();
         }
     }
 
@@ -96,7 +120,6 @@ class Agent {
             this->publisher.join();
         }
         this->disconnect();
-        BOOST_LOG_TRIVIAL(info) << "Disconnected from MQTT broker.";
     }
 };
 
