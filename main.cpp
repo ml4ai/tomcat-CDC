@@ -79,8 +79,6 @@ class Agent {
               {"source", "tomcat-CDC"},
               {"version", "0.0.1"}}}};
 
-        // To modify values, we must view them as objects using the as_object()
-        // method.
         output_message["data"] = {{"key", "value"}};
 
         mqtt_client->publish("agent/tomcat-CDC/coordination_event",
