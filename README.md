@@ -2,6 +2,13 @@
 
 ToMCAT's Coordination Detection Component
 
+This component requires an active mosquitto message broker. If you do not have one installed, call:
+
+```
+sudo port install mosquitto
+sudo port load mosquitto
+```
+
 To install the prerequisites using MacPorts:
 
 ```
