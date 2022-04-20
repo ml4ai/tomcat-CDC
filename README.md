@@ -36,3 +36,9 @@ To see available options:
 ```
 ./main -h
 ```
+
+To see the program's output, subscribe your message broker to "agent/tomcat-CDC/coordination_event", like so:
+
+```
+mosquitto_sub -t "agent/tomcat-CDC/coordination_event"
+```
