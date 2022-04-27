@@ -58,7 +58,7 @@ class Agent {
     bool look_for_label(const json::array extractions, string label) {
         for (auto extraction : extractions) {
             json::array labels = extraction.at("labels").as_array();
-            if (contains(labels, json::string(label.c_str()))) {
+            if (contains(labels, json::string_view(label))) {
                 return true;
             }
         }
