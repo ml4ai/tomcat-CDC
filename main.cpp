@@ -16,6 +16,8 @@
 
 #include "mqtt/async_client.h"
 
+#include "utils.hpp"
+
 namespace po = boost::program_options;
 namespace json = boost::json;
 namespace fs = boost::filesystem;
@@ -56,9 +58,7 @@ class Agent {
     bool look_for_label(const json::array extractions, string label) {
         for (auto extraction : extractions) {
             json::array labels = extraction.at("labels").as_array();
-            if (find(labels.begin(),
-                     labels.end(),
-                     json::string(label.c_str()))) {
+            if (contains(labels, json::string(label.c_str()))) {
                 return true;
             }
         }
@@ -162,7 +162,6 @@ class Agent {
                 ->wait();
         }
     }
-
 
   public:
     Agent(string address) {
