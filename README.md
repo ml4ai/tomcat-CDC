@@ -22,7 +22,7 @@ To build:
 mkdir build
 cd build
 cmake ..
-make -j`
+make -j
 ```
 
 To run the program (assuming you are in the build directory)o
