@@ -64,6 +64,7 @@ class Agent {
         }
         return false;
     }
+    //map<string, string> label_map;
 
     void publish_coordination_message() {
         string timestamp = get_timestamp();
@@ -137,7 +138,11 @@ class Agent {
 
         utterance_queue.push_back(jv);
         // Look for label
-        check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
+        //check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
+        for (int i=0; i<map_rows; ++i)
+        {
+           check_label_seq_2(label_map[i][0], label_map[i][1], utterance_queue);
+        }
     }
 
     /** Function that publishes heartbeat messages while the agent is running */
