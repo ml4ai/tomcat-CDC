@@ -14,6 +14,9 @@ find_package(
     log
     REQUIRED
 )
+
 add_executable(main main.cpp)
-#add_executable(test test.cpp)
 target_link_libraries(main PahoMqttCpp::paho-mqttpp3 ${Boost_LIBRARIES})
+
+add_executable(test test.cpp)
+target_include_directories(test PRIVATE ${Boost_INCLUDE_DIRS})
