@@ -64,8 +64,9 @@ class Agent {
         }
         return false;
     }
+    //map<string, string> label_map;
 
-    void publish_coordination_message() {
+    void publish_coordination_message(auto evidence) {
         string timestamp = get_timestamp();
 
         json::object output_message = {
@@ -79,7 +80,7 @@ class Agent {
               {"source", "tomcat-CDC"},
               {"version", "0.0.1"}}}};
 
-        output_message["data"] = {{"key", "value"}};
+        output_message["data"] = {evidence};
 
         mqtt_client->publish("agent/tomcat-CDC/coordination_event",
                              json::serialize(output_message));
@@ -100,7 +101,6 @@ class Agent {
             item_1.at("data").at("extractions").as_array();
 
         if (look_for_label(item_1_extractions, label_1)) {
-            BOOST_LOG_TRIVIAL(info) << "First label detected";
             for (size_t i = 1; i < utterance_queue.size(); i++) {
                 json::array extractions = utterance_queue.at(i)
                                               .at("data")
@@ -113,7 +113,9 @@ class Agent {
                 if (look_for_label(extractions, label_2) and (id1 != id2)) {
                     BOOST_LOG_TRIVIAL(info) << label_1 << " and " << label_2
                                             << " sequence detected.";
-                    publish_coordination_message();
+                                            string label_evidence = label_1 + "," +label_2;
+                                           json::object evidence={{"labels:",label_evidence}};
+                    publish_coordination_message(evidence);
                 };
             }
         };
@@ -137,7 +139,11 @@ class Agent {
 
         utterance_queue.push_back(jv);
         // Look for label
-        check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
+        //check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
+        for (int i=0; i<map_rows; ++i)
+        {
+           check_label_seq_2(label_map[i][0], label_map[i][1], utterance_queue);
+        }
     }
 
     /** Function that publishes heartbeat messages while the agent is running */
