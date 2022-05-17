@@ -7,6 +7,7 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <yaml-cpp/yaml.h>
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem.hpp>
@@ -121,9 +122,24 @@ class Agent {
         };
     }
 
+    YAML::Node read_config(const std::string file_name){
+        YAML::Node config;
+        try{
+             config = YAML::LoadFile(file_name);
+        }catch(YAML::BadFile &e){
+             std::cerr<< e.what() << std::endl;
+             std::exit(EXIT_FAILURE);
+        }
+
+        return config;
+    }
+
     /** Function that processes incoming messages */
     void process(mqtt::const_message_ptr msg) {
         json::object jv = json::parse(msg->to_string()).as_object();
+
+        YAML::Node config = read_config("../test.yml");
+        const YAML::Node& label_map = config["check_label_seq"];
 
         // Uncomment the line below to print the message
         // cout << jv << endl;
@@ -140,9 +156,11 @@ class Agent {
         utterance_queue.push_back(jv);
         // Look for label
         //check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
-        for (int i=0; i<map_rows; ++i)
+        for (int i=0; i<label_map.size(); ++i)
         {
-           check_label_seq_2(label_map[i][0], label_map[i][1], utterance_queue);
+           const std::string label_1 = label_map[i]["label1"].as<std::string>();
+           const std::string label_2 = label_map[i]["label2"].as<std::string>();
+           check_label_seq_2(label_1, label_2, utterance_queue);
         }
     }
 
@@ -208,7 +226,6 @@ class Agent {
 };
 
 int main(int argc, char* argv[]) {
-
     // Setting up program options
     po::options_description generic("Generic options");
 
