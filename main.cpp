@@ -90,7 +90,8 @@ class Agent {
      * other items in the queue have this label  */
     void check_label_seq_2(const string& label_1,
                            const string& label_2,
-                           deque<json::object> utterance_queue) {
+                           deque<json::object> utterance_queue,
+                           bool& verbose) {
 
         // Check first item in the queue for label1
         json::object item_1 = utterance_queue.front();
@@ -108,6 +109,10 @@ class Agent {
                                               .at("data")
                                               .at("extractions")
                                               .as_array();
+                json::string text_2 = utterance_queue.at(1)
+                                        .at("data").
+                                        at("text").
+                                        as_string();                              
                 json::string id2 = utterance_queue.at(i)
                                        .at("data")
                                        .at("participant_id")
@@ -116,16 +121,20 @@ class Agent {
                     BOOST_LOG_TRIVIAL(info) << label_1 << " and " << label_2
                                             << " sequence detected.";
                                             string label_evidence = label_1 + "," +label_2;
+                                            if (verbose) {
+                                                BOOST_LOG_TRIVIAL(info) << "utterance 1:" << text_1
+                                                << "\n" 
+                                                << "utterance 2:" << text_2;
+                                            }
                                            json::object evidence={{"labels:",label_evidence}};
                     publish_coordination_message(evidence);
-                    BOOST_LOG_TRIVIAL(info) << text_1;
                 };
             }
         };
     }
 
     /** Function that processes incoming messages */
-    void process(mqtt::const_message_ptr msg) {
+    void process(mqtt::const_message_ptr msg, bool& verbose) {
         json::object jv = json::parse(msg->to_string()).as_object();
 
         // Uncomment the line below to print the message
@@ -145,7 +154,7 @@ class Agent {
         //check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
         for (int i=0; i<map_rows; ++i)
         {
-           check_label_seq_2(label_map[i][0], label_map[i][1], utterance_queue);
+           check_label_seq_2(label_map[i][0], label_map[i][1], utterance_queue, verbose);
         }
     }
 
@@ -173,7 +182,7 @@ class Agent {
     }
 
   public:
-    Agent(string address) {
+    Agent(string address, bool verbose) {
         // Create an MQTT client using a smart pointer to be shared among
         // threads.
         this->mqtt_client = make_shared<mqtt::async_client>(address, "agent");
@@ -186,7 +195,7 @@ class Agent {
                             .finalize();
 
         mqtt_client->set_message_callback(
-            [&](mqtt::const_message_ptr msg) { process(msg); });
+            [&](mqtt::const_message_ptr msg) { process(msg,verbose); });
 
         auto rsp = this->mqtt_client->connect(connOpts)->get_connect_response();
         BOOST_LOG_TRIVIAL(info)
@@ -287,7 +296,7 @@ int main(int argc, char* argv[]) {
 
     signal(SIGINT, signal_handler);
 
-    Agent agent(address);
+    Agent agent(address, verbose);
     while (true) {
         if (gSignalStatus == SIGINT) {
             BOOST_LOG_TRIVIAL(info)
