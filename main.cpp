@@ -95,6 +95,8 @@ class Agent {
         // Check first item in the queue for label1
         json::object item_1 = utterance_queue.front();
 
+        json::string text_1 = item_1.at("data").at("text").as_string();
+
         json::string id1 = item_1.at("data").at("participant_id").as_string();
 
         json::array item_1_extractions =
@@ -116,6 +118,7 @@ class Agent {
                                             string label_evidence = label_1 + "," +label_2;
                                            json::object evidence={{"labels:",label_evidence}};
                     publish_coordination_message(evidence);
+                    BOOST_LOG_TRIVIAL(info) << text_1;
                 };
             }
         };
@@ -226,6 +229,10 @@ int main(int argc, char* argv[]) {
                          "MQTT broker host")(
         "mqtt.port", po::value<int>()->default_value(1883), "MQTT broker port");
 
+    config.add_options()("verbose", "Display the utterances the CDC matched on.")(
+        "verbose_file",
+        "Export the utterances into a file.");
+
     po::options_description cmdline_options;
     cmdline_options.add(generic).add(config);
 
@@ -261,6 +268,22 @@ int main(int argc, char* argv[]) {
 
     string address = "tcp://" + vm["mqtt.host"].as<string>() + ":" +
                      to_string(vm["mqtt.port"].as<int>());
+
+
+    // Here we decide whether to run the agent in verbose/file mode
+    bool verbose = false;
+    bool verbose_file = false;
+    if (vm.count("verbose")) {
+        verbose = true;
+
+    }
+    if (vm.count("verbose_file")) {
+        verbose_file = true;
+    }
+    if (verbose and verbose_file) {
+        BOOST_LOG_TRIVIAL(error) << "\"verbose\" and \"verbose_file\" are not compatible, please select either or";
+        return EXIT_FAILURE;
+    }
 
     signal(SIGINT, signal_handler);
 
