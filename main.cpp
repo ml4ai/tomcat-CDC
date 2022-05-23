@@ -122,23 +122,10 @@ class Agent {
         };
     }
 
-    YAML::Node read_config(const std::string file_name){
-        YAML::Node config;
-        try{
-             config = YAML::LoadFile(file_name);
-        }catch(YAML::BadFile &e){
-             std::cerr<< e.what() << std::endl;
-             std::exit(EXIT_FAILURE);
-        }
-
-        return config;
-    }
-
     /** Function that processes incoming messages */
-    void process(mqtt::const_message_ptr msg) {
+    void process(mqtt::const_message_ptr msg, YAML::Node config) {
         json::object jv = json::parse(msg->to_string()).as_object();
 
-        YAML::Node config = read_config("../test.yml");
         const YAML::Node& label_map = config["check_label_seq"];
 
         // Uncomment the line below to print the message
@@ -188,7 +175,7 @@ class Agent {
     }
 
   public:
-    Agent(string address) {
+    Agent(string address, YAML::Node config) {
         // Create an MQTT client using a smart pointer to be shared among
         // threads.
         this->mqtt_client = make_shared<mqtt::async_client>(address, "agent");
@@ -201,7 +188,7 @@ class Agent {
                             .finalize();
 
         mqtt_client->set_message_callback(
-            [&](mqtt::const_message_ptr msg) { process(msg); });
+            [&](mqtt::const_message_ptr msg) {process(msg, config); });
 
         auto rsp = this->mqtt_client->connect(connOpts)->get_connect_response();
         BOOST_LOG_TRIVIAL(info)
@@ -225,23 +212,48 @@ class Agent {
     }
 };
 
+class Config {
+    // Stores file path
+    string file_path;
+
+    public:
+        Config(string file){
+            // Assigns file path
+            file_path = file;
+        }
+
+        YAML::Node read_config(){
+            YAML::Node config;
+
+            try{
+                 // Loads config yaml file
+                 config = YAML::LoadFile(file_path);
+            }catch(YAML::BadFile &e){
+                 std::cerr<< e.what() << std::endl;
+                 std::exit(EXIT_FAILURE);
+            }
+            return config;
+        }
+};
+
 int main(int argc, char* argv[]) {
+
     // Setting up program options
     po::options_description generic("Generic options");
 
+    // Set config file path
     string config_path;
-    generic.add_options()("help,h", "Display this help message")(
-        "version,v",
-        "Display the version number")("config,c",
-                                      po::value<string>(&config_path),
-                                      "Path to (optional) config file.");
+    generic.add_options()
+        ("help,h", "Display this help message")
+        ("version,v", "Display the version number")
+        ("config,c", po::value<string>(&config_path)->default_value("../config.yml"), "Path to (optional) config file.");
+
 
     po::options_description config("Configuration");
 
-    config.add_options()("mqtt.host",
-                         po::value<string>()->default_value("localhost"),
-                         "MQTT broker host")(
-        "mqtt.port", po::value<int>()->default_value(1883), "MQTT broker port");
+    config.add_options()
+        ("mqtt.host", po::value<string>()->default_value("localhost"), "MQTT broker host")
+        ("mqtt.port", po::value<int>()->default_value(1883), "MQTT broker port");
 
     po::options_description cmdline_options;
     cmdline_options.add(generic).add(config);
@@ -263,7 +275,7 @@ int main(int argc, char* argv[]) {
     // options from it.
     if (vm.count("config")) {
         if (fs::exists(config_path)) {
-            po::store(po::parse_config_file(config_path.c_str(), config), vm);
+            //po::store(po::parse_config_file(config_path.c_str(), config), vm);
         }
         else {
             BOOST_LOG_TRIVIAL(error) << "Specified config file '" << config_path
@@ -279,9 +291,13 @@ int main(int argc, char* argv[]) {
     string address = "tcp://" + vm["mqtt.host"].as<string>() + ":" +
                      to_string(vm["mqtt.port"].as<int>());
 
+    string file_path = vm["config"].as<string>();
+    Config c = Config(file_path);
+    YAML::Node config_load = c.read_config();
+
     signal(SIGINT, signal_handler);
 
-    Agent agent(address);
+    Agent agent(address, config_load);
     while (true) {
         if (gSignalStatus == SIGINT) {
             BOOST_LOG_TRIVIAL(info)
