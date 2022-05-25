@@ -8,6 +8,10 @@
 #include <string>
 #include <thread>
 
+// for writing log-files
+#include <iostream>
+#include <fstream>
+
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/json.hpp>
@@ -91,7 +95,8 @@ class Agent {
     void check_label_seq_2(const string& label_1,
                            const string& label_2,
                            deque<json::object> utterance_queue,
-                           bool& verbose) {
+                           bool& verbose,
+                           bool& verbose_file) {
 
         // Check first item in the queue for label1
         json::object item_1 = utterance_queue.front();
@@ -109,7 +114,7 @@ class Agent {
                                               .at("data")
                                               .at("extractions")
                                               .as_array();
-                json::string text_2 = utterance_queue.at(1)
+                json::string text_2 = utterance_queue.at(i)
                                         .at("data").
                                         at("text").
                                         as_string();                              
@@ -126,7 +131,13 @@ class Agent {
                                                 << "\n" 
                                                 << "utterance 2:" << text_2;
                                             }
-                                           json::object evidence={{"labels:",label_evidence}};
+
+                                            json::object evidence={{"labels:",label_evidence}};
+
+                                            if (verbose_file) {
+                                                writeToLog(utterance_queue, i, evidence);
+                                            }
+                                           
                     publish_coordination_message(evidence);
                 };
             }
@@ -134,7 +145,7 @@ class Agent {
     }
 
     /** Function that processes incoming messages */
-    void process(mqtt::const_message_ptr msg, bool& verbose) {
+    void process(mqtt::const_message_ptr msg, bool& verbose, bool& verbose_file) {
         json::object jv = json::parse(msg->to_string()).as_object();
 
         // Uncomment the line below to print the message
@@ -154,7 +165,7 @@ class Agent {
         //check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
         for (int i=0; i<map_rows; ++i)
         {
-           check_label_seq_2(label_map[i][0], label_map[i][1], utterance_queue, verbose);
+           check_label_seq_2(label_map[i][0], label_map[i][1], utterance_queue, verbose, verbose_file);
         }
     }
 
@@ -182,7 +193,7 @@ class Agent {
     }
 
   public:
-    Agent(string address, bool verbose) {
+    Agent(string address, bool verbose, bool verbose_file) {
         // Create an MQTT client using a smart pointer to be shared among
         // threads.
         this->mqtt_client = make_shared<mqtt::async_client>(address, "agent");
@@ -195,7 +206,7 @@ class Agent {
                             .finalize();
 
         mqtt_client->set_message_callback(
-            [&](mqtt::const_message_ptr msg) { process(msg,verbose); });
+            [&](mqtt::const_message_ptr msg) { process(msg,verbose, verbose_file); });
 
         auto rsp = this->mqtt_client->connect(connOpts)->get_connect_response();
         BOOST_LOG_TRIVIAL(info)
@@ -205,6 +216,11 @@ class Agent {
 
         /** Start publishing heartbeat messages */
         this->heartbeat_publisher = thread(&Agent::publish_heartbeats, this);
+
+        /** create a log file if prompted*/
+        if (verbose_file){
+            createLog();
+        }
     };
 
     /** Destructor for the class that cleans up threads and disconnects from
@@ -296,7 +312,7 @@ int main(int argc, char* argv[]) {
 
     signal(SIGINT, signal_handler);
 
-    Agent agent(address, verbose);
+    Agent agent(address, verbose, verbose_file);
     while (true) {
         if (gSignalStatus == SIGINT) {
             BOOST_LOG_TRIVIAL(info)
