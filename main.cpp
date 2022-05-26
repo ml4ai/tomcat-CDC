@@ -126,6 +126,7 @@ class Agent {
     void process(mqtt::const_message_ptr msg, YAML::Node config) {
         json::object jv = json::parse(msg->to_string()).as_object();
 
+        // Get relevant node in the config file
         const YAML::Node& label_map = config["check_label_seq"];
 
         // Uncomment the line below to print the message
@@ -141,6 +142,7 @@ class Agent {
         }
 
         utterance_queue.push_back(jv);
+
         // Look for label
         //check_label_seq_2("CriticalVictim", "MoveTo", utterance_queue);
         for (int i=0; i<label_map.size(); ++i)
@@ -219,9 +221,9 @@ class Config {
     public:
         Config(string file){
 
+            // Checks file extension
             string extension = boost::filesystem::extension(file);
-
-            if (extension != ".yaml" || extension != ".yml"){
+            if (extension != ".yaml" && extension != ".yml"){
                 std::cout << "Bad File: config file must be a YAML file." << std::endl;
                 std::exit(EXIT_FAILURE);
             }
@@ -238,6 +240,7 @@ class Config {
                 // Loads config yaml file
                 config = YAML::LoadFile(file_path);
             }
+            // Catches errors in given file
             catch(YAML::BadFile &e){
                 std::cout << "Error parsing YAML config file: ";
                 std::cerr<< e.what() << std::endl;
@@ -257,7 +260,7 @@ int main(int argc, char* argv[]) {
     // Setting up program options
     po::options_description generic("Generic options");
 
-    // Set config file path
+    // Set config file path, set to default value unless given a file path
     string config_path;
     generic.add_options()
         ("help,h", "Display this help message")
@@ -307,6 +310,7 @@ int main(int argc, char* argv[]) {
     string address = "tcp://" + vm["mqtt.host"].as<string>() + ":" +
                      to_string(vm["mqtt.port"].as<int>());
 
+    // Gets file path and calls the read method to load file
     string file_path = vm["config"].as<string>();
     Config c = Config(file_path);
     YAML::Node config_load = c.read_config();
