@@ -37,6 +37,12 @@ To see available options:
 ./main -h
 ```
 
+To run with a different config file than the default file (The given file must
+be a YAML file):
+```
+./main -c file_path
+```
+
 To see the program's output, subscribe your message broker to "agent/tomcat-CDC/coordination_event", like so:
 
 ```

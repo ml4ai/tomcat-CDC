@@ -218,19 +218,35 @@ class Config {
 
     public:
         Config(string file){
-            // Assigns file path
-            file_path = file;
+
+            string extension = boost::filesystem::extension(file);
+
+            if (extension != ".yaml" || extension != ".yml"){
+                std::cout << "Bad File: config file must be a YAML file." << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
+            else{
+              // Assigns file path
+              file_path = file;
+            }
         }
 
         YAML::Node read_config(){
             YAML::Node config;
 
             try{
-                 // Loads config yaml file
-                 config = YAML::LoadFile(file_path);
-            }catch(YAML::BadFile &e){
-                 std::cerr<< e.what() << std::endl;
-                 std::exit(EXIT_FAILURE);
+                // Loads config yaml file
+                config = YAML::LoadFile(file_path);
+            }
+            catch(YAML::BadFile &e){
+                std::cout << "Error parsing YAML config file: ";
+                std::cerr<< e.what() << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
+            catch (YAML::ParserException &e){
+                std::cout << "Error parsing YAML config file: ";
+                std::cerr<< e.what() << std::endl;
+                std::exit(EXIT_FAILURE);
             }
             return config;
         }
