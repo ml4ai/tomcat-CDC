@@ -9,6 +9,10 @@
 #include <thread>
 #include <yaml-cpp/yaml.h>
 
+// for writing log-files
+#include <iostream>
+#include <fstream>
+
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/json.hpp>
@@ -91,10 +95,14 @@ class Agent {
      * other items in the queue have this label  */
     void check_label_seq_2(const string& label_1,
                            const string& label_2,
-                           deque<json::object> utterance_queue) {
+                           deque<json::object> utterance_queue,
+                           bool& verbose,
+                           bool& verbose_file) {
 
         // Check first item in the queue for label1
         json::object item_1 = utterance_queue.front();
+
+        json::string text_1 = item_1.at("data").at("text").as_string();
 
         json::string id1 = item_1.at("data").at("participant_id").as_string();
 
@@ -107,6 +115,10 @@ class Agent {
                                               .at("data")
                                               .at("extractions")
                                               .as_array();
+                json::string text_2 = utterance_queue.at(i)
+                                        .at("data").
+                                        at("text").
+                                        as_string();
                 json::string id2 = utterance_queue.at(i)
                                        .at("data")
                                        .at("participant_id")
@@ -115,7 +127,18 @@ class Agent {
                     BOOST_LOG_TRIVIAL(info) << label_1 << " and " << label_2
                                             << " sequence detected.";
                                             string label_evidence = label_1 + "," +label_2;
-                                           json::object evidence={{"labels:",label_evidence}};
+                                            if (verbose) {
+                                                BOOST_LOG_TRIVIAL(info) << "utterance 1:" << text_1
+                                                << "\n"
+                                                << "utterance 2:" << text_2;
+                                            }
+
+                                            json::object evidence={{"labels:",label_evidence}};
+
+                                            if (verbose_file) {
+                                                writeToLog(utterance_queue, i, evidence);
+                                            }
+
                     publish_coordination_message(evidence);
                 };
             }
@@ -123,7 +146,7 @@ class Agent {
     }
 
     /** Function that processes incoming messages */
-    void process(mqtt::const_message_ptr msg, YAML::Node config) {
+    void process(mqtt::const_message_ptr msg, YAML::Node config, bool& verbose, bool& verbose_file) {
         json::object jv = json::parse(msg->to_string()).as_object();
 
         // Get relevant node in the config file
@@ -149,7 +172,7 @@ class Agent {
         {
            const std::string label_1 = label_map[i]["label1"].as<std::string>();
            const std::string label_2 = label_map[i]["label2"].as<std::string>();
-           check_label_seq_2(label_1, label_2, utterance_queue);
+           check_label_seq_2(label_1, label_2, utterance_queue, verbose, verbose_file);
         }
     }
 
@@ -177,7 +200,7 @@ class Agent {
     }
 
   public:
-    Agent(string address, YAML::Node config) {
+    Agent(string address, YAML::Node config, bool verbose, bool verbose_file) {
         // Create an MQTT client using a smart pointer to be shared among
         // threads.
         this->mqtt_client = make_shared<mqtt::async_client>(address, "agent");
@@ -190,7 +213,7 @@ class Agent {
                             .finalize();
 
         mqtt_client->set_message_callback(
-            [&](mqtt::const_message_ptr msg) {process(msg, config); });
+            [&](mqtt::const_message_ptr msg) {process(msg, config, verbose, verbose_file); });
 
         auto rsp = this->mqtt_client->connect(connOpts)->get_connect_response();
         BOOST_LOG_TRIVIAL(info)
@@ -200,6 +223,11 @@ class Agent {
 
         /** Start publishing heartbeat messages */
         this->heartbeat_publisher = thread(&Agent::publish_heartbeats, this);
+
+        /** create a log file if prompted*/
+        if (verbose_file){
+            createLog();
+        }
     };
 
     /** Destructor for the class that cleans up threads and disconnects from
@@ -274,6 +302,10 @@ int main(int argc, char* argv[]) {
         ("mqtt.host", po::value<string>()->default_value("localhost"), "MQTT broker host")
         ("mqtt.port", po::value<int>()->default_value(1883), "MQTT broker port");
 
+    config.add_options()("verbose", "Display the utterances the CDC matched on.")(
+        "verbose_file",
+        "Export the utterances into a file.");
+
     po::options_description cmdline_options;
     cmdline_options.add(generic).add(config);
 
@@ -310,6 +342,22 @@ int main(int argc, char* argv[]) {
     string address = "tcp://" + vm["mqtt.host"].as<string>() + ":" +
                      to_string(vm["mqtt.port"].as<int>());
 
+
+    // Here we decide whether to run the agent in verbose/file mode
+    bool verbose = false;
+    bool verbose_file = false;
+    if (vm.count("verbose")) {
+        verbose = true;
+
+    }
+    if (vm.count("verbose_file")) {
+        verbose_file = true;
+    }
+    if (verbose and verbose_file) {
+        BOOST_LOG_TRIVIAL(error) << "\"verbose\" and \"verbose_file\" are not compatible, please select either or";
+        return EXIT_FAILURE;
+    }
+
     // Gets file path and calls the read method to load file
     string file_path = vm["config"].as<string>();
     Config c = Config(file_path);
@@ -317,7 +365,7 @@ int main(int argc, char* argv[]) {
 
     signal(SIGINT, signal_handler);
 
-    Agent agent(address, config_load);
+    Agent agent(address, config_load, verbose, verbose_file);
     while (true) {
         if (gSignalStatus == SIGINT) {
             BOOST_LOG_TRIVIAL(info)
